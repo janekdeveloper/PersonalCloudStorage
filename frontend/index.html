@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Личное облако</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="app-body">
+<div class="app-shell">
+    <header class="app-header">
+        <div class="app-header-left">
+            <span class="app-logo">☁</span>
+            <span class="app-name">Личное облако</span>
+        </div>
+        <div class="app-header-right">
+            <button id="logout-btn" class="btn ghost-btn"><span>🚪</span> Выйти</button>
+        </div>
+    </header>
+
+    <main class="app-main">
+        <section class="toolbar">
+            <div class="breadcrumbs" id="breadcrumbs"></div>
+            <div class="toolbar-buttons">
+                <label class="btn secondary-btn">
+                    <span>📤</span> Загрузить
+                    <input type="file" id="file-input" multiple style="display: none">
+                </label>
+                <button id="create-folder-btn" class="btn secondary-btn"><span>📁</span> Создать папку</button>
+                <button id="download-btn" class="btn secondary-btn" disabled><span>⬇️</span> Скачать</button>
+                <button id="rename-btn" class="btn secondary-btn" disabled><span>✏️</span> Переименовать</button>
+                <button id="share-btn" class="btn primary-btn" disabled><span>🔗</span> Получить ссылку</button>
+                <button id="unshare-btn" class="btn danger-btn" disabled><span>🔒</span> Закрыть доступ</button>
+                <button id="delete-btn" class="btn danger-btn" disabled><span>🗑️</span> Удалить</button>
+            </div>
+        </section>
+
+        <section class="content">
+            <div id="dropzone" class="dropzone">
+                <p style="font-size: 48px; margin: 0 0 16px; opacity: 0.6;">📎</p>
+                <p style="margin: 0; font-size: 16px; font-weight: 500;">Перетащите файлы сюда для загрузки</p>
+                <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.7;">или используйте кнопку «Загрузить»</p>
+            </div>
+
+            <div class="file-list-container">
+                <table class="file-table">
+                    <thead>
+                    <tr>
+                        <th>Имя</th>
+                        <th>Тип</th>
+                        <th>Размер</th>
+                        <th>Изменён</th>
+                    </tr>
+                    </thead>
+                    <tbody id="file-table-body">
+                    </tbody>
+                </table>
+                <div id="empty-state" class="empty-state" style="display: none;">
+                    В этой папке пока нет файлов.
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<div id="modal-backdrop" class="modal-backdrop" style="display: none;">
+    <div class="modal">
+        <h2 id="modal-title" class="modal-title"></h2>
+        <div class="modal-body">
+            <input type="text" id="modal-input" class="modal-input">
+            <div id="link-cards-container"></div>
+            <div id="modal-message" class="modal-message"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="modal-cancel" class="btn ghost-btn"><span>✕</span> Отмена</button>
+            <button id="modal-ok" class="btn primary-btn"><span>✓</span> OK</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast" style="display: none;"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
+

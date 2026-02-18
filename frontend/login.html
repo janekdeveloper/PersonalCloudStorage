@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Личное облако — Вход</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="auth-body">
+<div class="auth-container">
+    <div class="auth-card">
+        <h1 class="app-title">Личное облако</h1>
+        <h2 class="auth-title">Вход</h2>
+        <form id="login-form" class="auth-form">
+            <label class="field-label">
+                Логин
+                <input type="text" name="username" id="username" required autocomplete="username">
+            </label>
+            <label class="field-label">
+                Пароль
+                <input type="password" name="password" id="password" required autocomplete="current-password">
+            </label>
+            <button type="submit" class="btn primary-btn full-width"><span>🔐</span> Войти</button>
+            <div id="login-error" class="error-text" aria-live="polite"></div>
+        </form>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const form = document.getElementById('login-form');
+        const errorBox = document.getElementById('login-error');
+
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            errorBox.textContent = '';
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                errorBox.textContent = 'Введите логин и пароль.';
+                return;
+            }
+
+            try {
+                const resp = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({username, password}),
+                });
+
+                if (!resp.ok) {
+                    let msg = 'Неверный логин или пароль.';
+                    try {
+                        const data = await resp.json();
+                        if (data && data.detail) {
+                            msg = Array.isArray(data.detail) ? data.detail[0].msg || msg : data.detail;
+                        }
+                    } catch (_) {
+                        // ignore parse error
+                    }
+                    errorBox.textContent = msg;
+                    return;
+                }
+
+                window.location.href = '/index.html';
+            } catch (err) {
+                console.error(err);
+                errorBox.textContent = 'Ошибка соединения с сервером.';
+            }
+        });
+    })();
+</script>
+</body>
+</html>
+
