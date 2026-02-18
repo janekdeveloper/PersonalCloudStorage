@@ -396,12 +396,10 @@ async def download_file(
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    content_length = target.stat().st_size
     return FileResponse(
         path=str(target),
         media_type="application/octet-stream",
         filename=target.name,
-        content_length=content_length,
     )
 
 

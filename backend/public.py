@@ -33,12 +33,10 @@ def get_public_file(
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    content_length = file_path.stat().st_size
     return FileResponse(
         path=str(file_path),
         media_type="application/octet-stream",
         filename=file_path.name,
-        content_length=content_length,
     )
 
 
