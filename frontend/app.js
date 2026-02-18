@@ -684,20 +684,96 @@
                     showToast('Ссылка должна начинаться с http:// или https://');
                     return;
                 }
-                showToast('Загрузка…');
-                apiFetch('/files/upload-from-url', {
+
+                const progressBarId = createProgressBar('Загрузка по ссылке', 0);
+                showUploadProgress();
+
+                fetch('/files/upload-from-url', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({ url: trimmed, path: state.currentPath || '' }),
                 })
-                    .then(() => {
-                        showToast('Файл загружен');
-                        loadList(state.currentPath);
+                    .then((response) => {
+                        if (response.status === 401) {
+                            window.location.href = '/login.html';
+                            return null;
+                        }
+                        if (!response.ok) {
+                            removeProgressBar(progressBarId, false);
+                            response.text().then((text) => {
+                                let msg = 'Не удалось загрузить файл';
+                                try {
+                                    const data = JSON.parse(text);
+                                    if (data.detail) msg = data.detail;
+                                } catch (_) {
+                                    if (text) msg = text.slice(0, 100);
+                                }
+                                showToast(msg);
+                            }).catch(() => showToast('Не удалось загрузить файл'));
+                            return null;
+                        }
+                        return response;
+                    })
+                    .then((response) => {
+                        if (!response || !response.body) {
+                            if (response !== null) {
+                                removeProgressBar(progressBarId, false);
+                                showToast('Не удалось загрузить файл');
+                            }
+                            return;
+                        }
+                        const reader = response.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+                        function readNext() {
+                            return reader.read().then(({ value, done }) => {
+                                if (done) {
+                                    removeProgressBar(progressBarId, false);
+                                    showToast('Не удалось загрузить файл');
+                                    return;
+                                }
+                                buffer += decoder.decode(value, { stream: true });
+                                const lines = buffer.split('\n');
+                                buffer = lines.pop() || '';
+                                for (const line of lines) {
+                                    if (!line.trim()) continue;
+                                    try {
+                                        const obj = JSON.parse(line);
+                                        if (obj.error) {
+                                            removeProgressBar(progressBarId, false);
+                                            showToast(obj.error);
+                                            return;
+                                        }
+                                        if (obj.detail && obj.path) {
+                                            removeProgressBar(progressBarId, true);
+                                            showToast('Файл загружен');
+                                            loadList(state.currentPath);
+                                            return;
+                                        }
+                                        if (obj.loaded !== undefined) {
+                                            const loaded = obj.loaded;
+                                            const total = obj.total != null ? obj.total : null;
+                                            let percent;
+                                            if (total != null && total > 0) {
+                                                percent = (loaded / total) * 100;
+                                            } else {
+                                                percent = Math.min(99, (loaded / MAX_URL_DOWNLOAD_SIZE) * 100);
+                                            }
+                                            updateProgressBar(progressBarId, percent, loaded, total);
+                                        }
+                                    } catch (e) {
+                                        console.error('Parse NDJSON line:', e);
+                                    }
+                                }
+                                return readNext();
+                            });
+                        }
+                        return readNext();
                     })
                     .catch((err) => {
                         console.error(err);
+                        removeProgressBar(progressBarId, false);
                         showToast(err.message || 'Не удалось загрузить файл');
                     });
             },
@@ -935,6 +1011,8 @@
         return progressBarId;
     }
 
+    const MAX_URL_DOWNLOAD_SIZE = 4 * 1024 * 1024 * 1024; // 4 GB
+
     function updateProgressBar(progressBarId, percent, loaded, total) {
         const item = document.getElementById(progressBarId);
         if (!item) return;
@@ -949,8 +1027,12 @@
         if (barFill) {
             barFill.style.width = `${percent}%`;
         }
-        if (sizeSpan && loaded !== undefined && total !== undefined) {
-            sizeSpan.textContent = `${formatBytes(loaded)} / ${formatBytes(total)}`;
+        if (sizeSpan) {
+            if (loaded !== undefined && total !== undefined && total != null && total > 0) {
+                sizeSpan.textContent = `${formatBytes(loaded)} / ${formatBytes(total)}`;
+            } else if (loaded !== undefined) {
+                sizeSpan.textContent = formatBytes(loaded);
+            }
         }
     }
 

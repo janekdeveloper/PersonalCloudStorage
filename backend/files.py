@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -13,7 +14,7 @@ from urllib.parse import urlparse, unquote
 import httpx
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -167,7 +168,7 @@ def _filename_from_url(url: str) -> str:
     return unquote(path.split("/")[-1])
 
 
-MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
+MAX_DOWNLOAD_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
 DOWNLOAD_TIMEOUT = 60.0
 
 
@@ -243,11 +244,7 @@ async def upload_files(
     return {"detail": "files uploaded", "files": saved_files}
 
 
-@router.post("/upload-from-url")
-async def upload_from_url(
-    payload: UploadFromUrlRequest,
-    user: User = Depends(get_current_user),
-) -> dict:
+async def _upload_from_url_stream(payload: UploadFromUrlRequest) -> object:
     url = (payload.url or "").strip()
     if not url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required")
@@ -272,6 +269,9 @@ async def upload_from_url(
                         detail=f"Remote server returned {resp.status_code}",
                     )
 
+                content_length = resp.headers.get("content-length")
+                total = int(content_length) if content_length and content_length.isdigit() else None
+
                 filename = _filename_from_content_disposition(resp.headers.get("content-disposition"))
                 if not filename or not filename.strip():
                     filename = _filename_from_url(url)
@@ -290,17 +290,22 @@ async def upload_from_url(
                 _ensure_within_storage(dest)
 
                 written = 0
-                with dest.open("wb") as f:
+                f = dest.open("wb")
+                try:
                     async for chunk in resp.aiter_bytes(chunk_size=65536):
                         written += len(chunk)
                         if written > MAX_DOWNLOAD_SIZE:
                             f.close()
                             dest.unlink(missing_ok=True)
-                            raise HTTPException(
-                                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                                detail="File exceeds maximum allowed size (500 MB)",
-                            )
+                            yield (json.dumps({"error": "File exceeds maximum allowed size (4 GB)"}) + "\n").encode("utf-8")
+                            return
                         f.write(chunk)
+                        yield (json.dumps({"loaded": written, "total": total}) + "\n").encode("utf-8")
+                finally:
+                    f.close()
+
+                rel = _relative_from_storage(dest)
+                yield (json.dumps({"detail": "file uploaded", "path": rel}) + "\n").encode("utf-8")
 
     except httpx.TimeoutException:
         raise HTTPException(
@@ -313,8 +318,16 @@ async def upload_from_url(
             detail=str(e) or "Download failed",
         )
 
-    rel = _relative_from_storage(dest)
-    return {"detail": "file uploaded", "path": rel}
+
+@router.post("/upload-from-url")
+async def upload_from_url(
+    payload: UploadFromUrlRequest,
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    return StreamingResponse(
+        _upload_from_url_stream(payload),
+        media_type="application/x-ndjson",
+    )
 
 
 @router.delete("/delete")
