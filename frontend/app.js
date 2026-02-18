@@ -29,6 +29,7 @@
         modalOk: document.getElementById('modal-ok'),
         toast: document.getElementById('toast'),
         contextMenu: null,
+        uploadProgressContainer: document.getElementById('upload-progress-container'),
     };
 
     // Cache for share status
@@ -837,22 +838,206 @@
             });
     }
 
+    function showUploadProgress() {
+        if (elements.uploadProgressContainer) {
+            elements.uploadProgressContainer.style.display = 'block';
+        }
+    }
+
+    function hideUploadProgress() {
+        if (elements.uploadProgressContainer) {
+            elements.uploadProgressContainer.style.display = 'none';
+        }
+    }
+
+    function createProgressBar(fileName, fileSize) {
+        const progressBarId = `progress-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const item = document.createElement('div');
+        item.className = 'upload-progress-item';
+        item.id = progressBarId;
+
+        const info = document.createElement('div');
+        info.className = 'upload-progress-info';
+        
+        const fileNameSpan = document.createElement('span');
+        fileNameSpan.className = 'upload-progress-filename';
+        fileNameSpan.textContent = fileName;
+        
+        const sizeSpan = document.createElement('span');
+        sizeSpan.className = 'upload-progress-size';
+        sizeSpan.textContent = formatBytes(fileSize);
+        
+        const percentSpan = document.createElement('span');
+        percentSpan.className = 'upload-progress-percent';
+        percentSpan.textContent = '0%';
+
+        info.appendChild(fileNameSpan);
+        info.appendChild(sizeSpan);
+        info.appendChild(percentSpan);
+
+        const barWrapper = document.createElement('div');
+        barWrapper.className = 'upload-progress-bar-wrapper';
+        
+        const bar = document.createElement('div');
+        bar.className = 'upload-progress-bar';
+        
+        const barFill = document.createElement('div');
+        barFill.className = 'upload-progress-bar-fill';
+        barFill.style.width = '0%';
+        
+        bar.appendChild(barFill);
+        barWrapper.appendChild(bar);
+
+        item.appendChild(info);
+        item.appendChild(barWrapper);
+
+        if (elements.uploadProgressContainer) {
+            elements.uploadProgressContainer.appendChild(item);
+        }
+
+        return progressBarId;
+    }
+
+    function updateProgressBar(progressBarId, percent, loaded, total) {
+        const item = document.getElementById(progressBarId);
+        if (!item) return;
+
+        const percentSpan = item.querySelector('.upload-progress-percent');
+        const barFill = item.querySelector('.upload-progress-bar-fill');
+        const sizeSpan = item.querySelector('.upload-progress-size');
+
+        if (percentSpan) {
+            percentSpan.textContent = `${Math.round(percent)}%`;
+        }
+        if (barFill) {
+            barFill.style.width = `${percent}%`;
+        }
+        if (sizeSpan && loaded !== undefined && total !== undefined) {
+            sizeSpan.textContent = `${formatBytes(loaded)} / ${formatBytes(total)}`;
+        }
+    }
+
+    function removeProgressBar(progressBarId, success = true) {
+        const item = document.getElementById(progressBarId);
+        if (!item) return;
+
+        if (success) {
+            item.classList.add('upload-progress-success');
+            setTimeout(() => {
+                if (item.parentNode) {
+                    item.parentNode.removeChild(item);
+                }
+                // Скрыть контейнер, если больше нет прогресс-баров
+                if (elements.uploadProgressContainer && elements.uploadProgressContainer.children.length === 0) {
+                    hideUploadProgress();
+                }
+            }, 1500);
+        } else {
+            item.classList.add('upload-progress-error');
+        }
+    }
+
+    function uploadFileWithProgress(file, path) {
+        return new Promise((resolve, reject) => {
+            const progressBarId = createProgressBar(file.name, file.size);
+            showUploadProgress();
+
+            const xhr = new XMLHttpRequest();
+            const formData = new FormData();
+            formData.append('path', path || '');
+            formData.append('files', file);
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = (e.loaded / e.total) * 100;
+                    updateProgressBar(progressBarId, percent, e.loaded, e.total);
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status === 401) {
+                    removeProgressBar(progressBarId, false);
+                    window.location.href = '/login.html';
+                    reject(new Error('Unauthorized'));
+                    return;
+                }
+                
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        let data = null;
+                        const text = xhr.responseText;
+                        if (text) {
+                            try {
+                                data = JSON.parse(text);
+                            } catch {
+                                data = text;
+                            }
+                        }
+                        updateProgressBar(progressBarId, 100, file.size, file.size);
+                        removeProgressBar(progressBarId, true);
+                        resolve(data);
+                    } catch (err) {
+                        removeProgressBar(progressBarId, false);
+                        reject(new Error('Ошибка при обработке ответа'));
+                    }
+                } else {
+                    let errorMessage = 'Ошибка загрузки';
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        if (data && data.detail) {
+                            errorMessage = Array.isArray(data.detail) ? data.detail[0].msg || data.detail[0] : data.detail;
+                        }
+                    } catch {
+                        errorMessage = xhr.statusText || `HTTP ${xhr.status}`;
+                    }
+                    removeProgressBar(progressBarId, false);
+                    reject(new Error(errorMessage));
+                }
+            };
+
+            xhr.onerror = () => {
+                removeProgressBar(progressBarId, false);
+                reject(new Error('Ошибка сети'));
+            };
+
+            xhr.onabort = () => {
+                removeProgressBar(progressBarId, false);
+                reject(new Error('Загрузка отменена'));
+            };
+
+            // XMLHttpRequest автоматически отправляет cookies (включая HttpOnly cookies)
+            xhr.open('POST', '/files/upload');
+            xhr.withCredentials = true; // Убеждаемся, что cookies отправляются
+            xhr.send(formData);
+        });
+    }
+
     function handleFilesSelected(files) {
         if (!files || !files.length) return;
 
-        const formData = new FormData();
-        formData.append('path', state.currentPath || '');
-        Array.from(files).forEach((file) => {
-            formData.append('files', file);
-        });
+        const fileArray = Array.from(files);
+        const uploadPromises = fileArray.map(file => 
+            uploadFileWithProgress(file, state.currentPath || '')
+                .catch(err => {
+                    console.error(`Ошибка загрузки ${file.name}:`, err);
+                    showToast(`Ошибка загрузки ${file.name}: ${err.message}`);
+                    return { error: true, file: file.name, error: err };
+                })
+        );
 
-        apiFetch('/files/upload', {
-            method: 'POST',
-            body: formData,
-        })
-            .then(() => {
-                showToast('Файлы загружены');
-                loadList(state.currentPath);
+        Promise.all(uploadPromises)
+            .then((results) => {
+                const successCount = results.filter(r => !r || !r.error).length;
+                const errorCount = results.filter(r => r && r.error).length;
+                
+                if (successCount > 0) {
+                    loadList(state.currentPath);
+                    if (errorCount === 0) {
+                        showToast(`Файлы загружены (${successCount})`);
+                    } else {
+                        showToast(`Загружено ${successCount} из ${fileArray.length} файлов`);
+                    }
+                }
             })
             .catch((err) => {
                 console.error(err);
