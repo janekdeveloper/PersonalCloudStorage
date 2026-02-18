@@ -14,6 +14,7 @@
         dropzone: document.getElementById('dropzone'),
         fileInput: document.getElementById('file-input'),
         createFolderBtn: document.getElementById('create-folder-btn'),
+        uploadFromUrlBtn: document.getElementById('upload-from-url-btn'),
         deleteBtn: document.getElementById('delete-btn'),
         renameBtn: document.getElementById('rename-btn'),
         downloadBtn: document.getElementById('download-btn'),
@@ -667,6 +668,42 @@
         });
     }
 
+    function handleUploadFromUrl() {
+        openModal({
+            title: 'Загрузить по ссылке',
+            placeholder: 'Ссылка на файл (http или https)',
+            message: '',
+            showInput: true,
+            onOk: (url) => {
+                const trimmed = (url || '').trim();
+                if (!trimmed) {
+                    showToast('Введите ссылку');
+                    return;
+                }
+                if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+                    showToast('Ссылка должна начинаться с http:// или https://');
+                    return;
+                }
+                showToast('Загрузка…');
+                apiFetch('/files/upload-from-url', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: trimmed, path: state.currentPath || '' }),
+                })
+                    .then(() => {
+                        showToast('Файл загружен');
+                        loadList(state.currentPath);
+                    })
+                    .catch((err) => {
+                        console.error(err);
+                        showToast(err.message || 'Не удалось загрузить файл');
+                    });
+            },
+        });
+    }
+
     function handleDelete() {
         const selected = state.items[state.selectedIndex];
         if (!selected) return;
@@ -1079,6 +1116,9 @@
 
     function setupEvents() {
         elements.createFolderBtn.addEventListener('click', handleCreateFolder);
+        if (elements.uploadFromUrlBtn) {
+            elements.uploadFromUrlBtn.addEventListener('click', handleUploadFromUrl);
+        }
         elements.deleteBtn.addEventListener('click', handleDelete);
         elements.renameBtn.addEventListener('click', handleRename);
         elements.downloadBtn.addEventListener('click', handleDownload);

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import secrets
 import zipfile
 import tarfile
 from pathlib import Path
 from typing import List, Literal
+from urllib.parse import urlparse, unquote
+
+import httpx
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
@@ -60,6 +64,11 @@ class MoveRequest(BaseModel):
 class UnarchiveRequest(BaseModel):
     path: str
     mode: Literal["same_folder", "new_subfolder"] = "new_subfolder"
+
+
+class UploadFromUrlRequest(BaseModel):
+    url: str
+    path: str = ""
 
 
 class ShareResponse(BaseModel):
@@ -136,6 +145,32 @@ def _non_conflicting_path(target: Path) -> Path:
         counter += 1
 
 
+def _filename_from_content_disposition(value: str | None) -> str | None:
+    """Extract filename from Content-Disposition header."""
+    if not value:
+        return None
+    m = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^";\n]+)', value, re.IGNORECASE)
+    if not m:
+        m = re.search(r'filename=([^;\n]+)', value, re.IGNORECASE)
+    if not m:
+        return None
+    name = m.group(1).strip().strip('"\'')
+    return unquote(name) if name else None
+
+
+def _filename_from_url(url: str) -> str:
+    """Extract filename from URL path (last segment)."""
+    parsed = urlparse(url)
+    path = (parsed.path or "").rstrip("/")
+    if not path:
+        return ""
+    return unquote(path.split("/")[-1])
+
+
+MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
+DOWNLOAD_TIMEOUT = 60.0
+
+
 @router.get("/list", response_model=FileListResponse)
 async def list_files(
     path: str = "",
@@ -206,6 +241,80 @@ async def upload_files(
         saved_files.append(_relative_from_storage(dest))
 
     return {"detail": "files uploaded", "files": saved_files}
+
+
+@router.post("/upload-from-url")
+async def upload_from_url(
+    payload: UploadFromUrlRequest,
+    user: User = Depends(get_current_user),
+) -> dict:
+    url = (payload.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required")
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only http and https URLs are allowed",
+        )
+
+    target_dir = safe_join(payload.path)
+    if not target_dir.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target path not found")
+    if not target_dir.is_dir():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target path is not a directory")
+
+    try:
+        async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"Remote server returned {resp.status_code}",
+                    )
+
+                filename = _filename_from_content_disposition(resp.headers.get("content-disposition"))
+                if not filename or not filename.strip():
+                    filename = _filename_from_url(url)
+                if not filename or not filename.strip():
+                    content_type = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+                    ext = ".bin"
+                    if content_type.startswith("image/"):
+                        ext = "." + content_type.split("/", 1)[-1].split("+")[0]
+                    filename = f"downloaded_file{ext}"
+
+                filename = os.path.basename(filename)
+                if not filename:
+                    filename = "downloaded_file"
+                dest = target_dir / filename
+                dest = _non_conflicting_path(dest)
+                _ensure_within_storage(dest)
+
+                written = 0
+                with dest.open("wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        written += len(chunk)
+                        if written > MAX_DOWNLOAD_SIZE:
+                            f.close()
+                            dest.unlink(missing_ok=True)
+                            raise HTTPException(
+                                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                detail="File exceeds maximum allowed size (500 MB)",
+                            )
+                        f.write(chunk)
+
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Download timed out",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(e) or "Download failed",
+        )
+
+    rel = _relative_from_storage(dest)
+    return {"detail": "file uploaded", "path": rel}
 
 
 @router.delete("/delete")
