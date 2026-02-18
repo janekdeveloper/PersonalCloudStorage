@@ -31,6 +31,7 @@
         toast: document.getElementById('toast'),
         contextMenu: null,
         uploadProgressContainer: document.getElementById('upload-progress-container'),
+        diskUsage: document.getElementById('disk-usage'),
     };
 
     // Cache for share status
@@ -509,6 +510,19 @@
         loadList(path);
     }
 
+    function loadDiskUsage() {
+        if (!elements.diskUsage) return;
+        apiFetch('/files/disk-usage')
+            .then((data) => {
+                elements.diskUsage.textContent = `${formatBytes(data.used)} / ${formatBytes(data.total)}`;
+                elements.diskUsage.title = `Занято: ${formatBytes(data.used)}, свободно: ${formatBytes(data.free)}`;
+            })
+            .catch(() => {
+                elements.diskUsage.textContent = '';
+                elements.diskUsage.title = '';
+            });
+    }
+
     function loadList(path) {
         const effectivePath = (path || '').replace(/^\/+/, '');
         const qs = effectivePath ? `?path=${encodeURIComponent(effectivePath)}` : '';
@@ -520,6 +534,7 @@
                 state.items = data.items || [];
                 buildBreadcrumbs(state.currentPath);
                 renderList();
+                loadDiskUsage();
             })
             .catch((err) => {
                 console.error(err);
@@ -1226,6 +1241,7 @@
     function init() {
         createContextMenuElement();
         setupEvents();
+        loadDiskUsage();
         loadList('');
     }
 

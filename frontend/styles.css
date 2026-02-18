@@ -451,6 +451,17 @@ button {
     gap: 12px;
 }
 
+.disk-usage {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 10px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-color);
+}
+
 .app-main {
     padding: 20px 24px 24px;
     display: flex;

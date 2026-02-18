@@ -43,6 +43,12 @@ class FileListResponse(BaseModel):
     items: List[FileItem]
 
 
+class DiskUsageResponse(BaseModel):
+    total: int
+    used: int
+    free: int
+
+
 class CreateFolderRequest(BaseModel):
     path: str = ""
     name: str
@@ -199,6 +205,13 @@ async def list_files(
         )
 
     return FileListResponse(current_path=rel, items=items)
+
+
+@router.get("/disk-usage", response_model=DiskUsageResponse)
+async def get_disk_usage(user: User = Depends(get_current_user)) -> DiskUsageResponse:
+    """Return disk usage (total, used, free in bytes) for the filesystem containing storage."""
+    usage = shutil.disk_usage(STORAGE_ROOT)
+    return DiskUsageResponse(total=usage.total, used=usage.used, free=usage.free)
 
 
 @router.post("/folder")
