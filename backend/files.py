@@ -538,6 +538,23 @@ async def download_file(
     )
 
 
+@router.head("/download")
+async def head_file(
+    path: str,
+    user: User = Depends(get_current_user),
+) -> FileResponse:
+    """HEAD request for file metadata without downloading content."""
+    target = safe_join(path)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    return FileResponse(
+        path=str(target),
+        media_type="application/octet-stream",
+        filename=target.name,
+    )
+
+
 @router.get("/share/status", response_model=ShareStatusResponse)
 async def get_share_status(
     path: str,

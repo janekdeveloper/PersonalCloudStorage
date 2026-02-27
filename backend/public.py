@@ -40,6 +40,31 @@ def get_public_file(
     )
 
 
+@router.head("/{token}")
+def head_public_file(
+    token: str,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """
+    HEAD request for public file metadata without downloading content.
+    Returns Content-Length and other headers.
+    """
+    link = db.query(PublicLink).filter(PublicLink.token == token).first()
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link not found")
+
+    file_path = safe_join(link.file_path)
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/octet-stream",
+        filename=file_path.name,
+    )
+
+
 @router.get("/page/{token}", response_class=HTMLResponse)
 def get_public_page(
     token: str,
